@@ -1,99 +1,99 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <unistd.h>
-#include <string.h>
 
-#define WIDTH 110
-#define HEIGHT 50
+#define CANVAS_WIDTH 110
+#define CANVAS_HEIGHT 50
 
-#define RED "\033[31m"
-#define GREEN "\033[32m"
-#define YELLOW "\033[33m"
-#define BLUE "\033[34m"
-#define MAGENTA "\033[35m"
-#define CYAN "\033[36m"
-#define WHITE "\033[37m"
-#define RESET "\033[0m"
+const char* COLOR_CODES[] = {
+    "\033[31m", "\033[32m", "\033[33m", "\033[34m", "\033[35m", "\033[36m", "\033[91m", "\033[92m", "\033[93m", "\033[94m", "\033[95m", "\033[96m"};
 
-const char* colors[] = {RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE};
-const int num_colors = sizeof(colors) / sizeof(colors[0]);
+#define COLOR_COUNT (sizeof(COLOR_CODES) / sizeof(COLOR_CODES[0]))
+const char* LUMINANCE_CHARS = ".:-=+*#%@";
+#define LUMINANCE_LEVELS (sizeof(LUMINANCE_CHARS) - 1)
 
-const char shades[] = " .:!/r(l1Z4H9W8$@";
-const int num_shades = sizeof(shades) - 1;
+#define BUFFER_SIZE (CANVAS_HEIGHT * (CANVAS_WIDTH * 20 + 1) + 1)
 
 void clear_screen() {
     printf("\033[2J\033[H");
 }
 
-void draw_torus(double A, double B) {
-    char screen[HEIGHT][WIDTH][20];
-    double z_buffer[HEIGHT][WIDTH];
+void render_donut(double A, double B, char* buffer) {
+    char output[CANVAS_HEIGHT][CANVAS_WIDTH][20];
+    double z_buffer[CANVAS_HEIGHT][CANVAS_WIDTH];
 
-    for (int y = 0; y < HEIGHT; y++) {
-        for (int x = 0; x < WIDTH; x++) {
-            strcpy(screen[y][x], " ");
-            z_buffer[y][x] = -1e10;
+    memset(output, 0, sizeof(output));
+    for (int y = 0; y < CANVAS_HEIGHT; y++)
+        for (int x = 0; x < CANVAS_WIDTH; x++) {
+            strcpy(output[y][x], " ");
+            z_buffer[y][x] = -1e9;
         }
-    }
 
-    double R1 = 1;
-    double R2 = 2;
-    double K2 = 5;
-    double K1 = WIDTH * K2 * 3.0 / (8.0 * (R1 + R2));
+    double tube_radius = 1;
+    double donut_radius = 2;
+    double viewer_distance = 5;
+    double projection_factor = CANVAS_WIDTH * viewer_distance * 3 / (8 * (tube_radius + donut_radius));
 
     for (double theta = 0; theta < 2 * M_PI; theta += 0.07) {
+        double cos_theta = cos(theta), sin_theta = sin(theta);
         for (double phi = 0; phi < 2 * M_PI; phi += 0.02) {
-            double cosP = cos(phi), sinP = sin(phi);
-            double cosT = cos(theta), sinT = sin(theta);
-            double circleX = R2 + R1 * cosT;
-            double circleY = R1 * sinT;
+            double cos_phi = cos(phi), sin_phi = sin(phi);
+            
+            double circle_x = donut_radius + tube_radius * cos_theta;
+            double circle_y = tube_radius * sin_theta;
 
-            double x = circleX * (cos(B) * cosP + sin(A) * sin(B) * sinP) - circleY * cos(A) * sin(B);
-            double y = circleX * (sin(B) * cosP - sin(A) * cos(B) * sinP) + circleY * cos(A) * cos(B);
-            double z = K2 + cos(A) * circleX * sinP + circleY * sin(A);
-            double ooz = 1 / z;  // "one over z"
+            double x = circle_x * (cos(B) * cos_phi + sin(A) * sin(B) * sin_phi) - circle_y * cos(A) * sin(B);
+            double y = circle_x * (sin(B) * cos_phi - sin(A) * cos(B) * sin_phi) + circle_y * cos(A) * cos(B);
+            double z = viewer_distance + cos(A) * circle_x * sin_phi + circle_y * sin(A);
+            double inv_z = 1 / z;
 
-            int xp = (int)(WIDTH / 2 + K1 * ooz * x);
-            int yp = (int)(HEIGHT / 2 - K1 * ooz * y / 2);
+            int xp = (int)(CANVAS_WIDTH / 2 + projection_factor * inv_z * x);
+            int yp = (int)(CANVAS_HEIGHT / 2 - projection_factor * inv_z * y / 2);
 
-            // Lighting and depth calculation
-            double L = cosP * cosT * sin(B) - cos(A) * cosT * sinP - sin(A) * sinT + 0.5;
-            double depth = (z - K2 + R1 + R2) / (2 * (R1 + R2));  // Normalize depth
-
-            if (L > 0 && xp >= 0 && xp < WIDTH && yp >= 0 && yp < HEIGHT) {
-                if (ooz > z_buffer[yp][xp]) {
-                    z_buffer[yp][xp] = ooz;
-                    
-                    // Combine lighting and depth for shading
-                    int shade_index = (int)((L * 0.7 + depth * 0.3) * (num_shades - 1));
-                    shade_index = (shade_index < 0) ? 0 : (shade_index >= num_shades ? num_shades - 1 : shade_index);
-
-                    // Use depth to determine color
-                    int color_index = (int)(depth * (num_colors - 1));
-                    color_index = (color_index < 0) ? 0 : (color_index >= num_colors ? num_colors - 1 : color_index);
-
-                    sprintf(screen[yp][xp], "%s%c" RESET, colors[color_index], shades[shade_index]);
+            double luminance = cos_phi * cos_theta * sin(B) - cos(A) * cos_theta * sin_phi - sin(A) * sin_theta + 0.5;
+            if (luminance > 0 && xp >= 0 && xp < CANVAS_WIDTH && yp >= 0 && yp < CANVAS_HEIGHT) {
+                if (inv_z > z_buffer[yp][xp]) {
+                    z_buffer[yp][xp] = inv_z;
+                    int luminance_index = (int)(luminance * (LUMINANCE_LEVELS - 1));
+                    luminance_index = (luminance_index < 0) ? 0 : (luminance_index >= LUMINANCE_LEVELS ? LUMINANCE_LEVELS - 1 : luminance_index);
+                    int color_index = (int)(fmod(theta + phi, 2 * M_PI) / (2 * M_PI) * COLOR_COUNT);
+                    sprintf(output[yp][xp], "%s%c\033[0m", COLOR_CODES[color_index], LUMINANCE_CHARS[luminance_index]);
                 }
             }
         }
     }
 
-    for (int y = 0; y < HEIGHT; y++) {
-        for (int x = 0; x < WIDTH; x++) {
-            printf("%s", screen[y][x]);
+    char* ptr = buffer;
+    for (int y = 0; y < CANVAS_HEIGHT; y++) {
+        for (int x = 0; x < CANVAS_WIDTH; x++) {
+            int written = sprintf(ptr, "%s", output[y][x]);
+            ptr += written;
         }
-        printf("\n");
+        *ptr++ = '\n';
     }
+    *ptr = '\0';
 }
 
 int main() {
+    char* buffer = (char*)malloc(BUFFER_SIZE);
+    if (buffer == NULL) {
+        fprintf(stderr, "Failed to allocate memory for buffer\n");
+        return 1;
+    }
+
     double A = 0, B = 0;
     while (1) {
+        render_donut(A, B, buffer);
         clear_screen();
-        draw_torus(A, B);
+        fwrite(buffer, 1, strlen(buffer), stdout);
+        fflush(stdout);
         usleep(50000);
         A += 0.04;
         B += 0.02;
     }
+
+    free(buffer);
     return 0;
 }
